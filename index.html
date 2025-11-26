@@ -2,855 +2,459 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pocket Browser AI</title>
-    
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- Babel for JSX -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chrome Clone</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    
-    <!-- Hide scrollbars for app-like feel -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        .scrollbar-hide::-webkit-scrollbar {
-            display: none;
-        }
-        .scrollbar-hide {
-            -ms-overflow-style: none;
-            scrollbar-width: none;
-        }
-        .animate-fade-in {
-            animation: fadeIn 0.3s ease-in-out;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        /* Calculator Styles */
-        .calc-btn {
-            transition: all 0.1s;
-        }
-        .calc-btn:active {
-            transform: scale(0.95);
+        /* Chrome-specific custom styles */
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow: hidden; }
+        
+        .tab-shape {
+            position: relative;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+            z-index: 1;
         }
         
-        /* Markdown-like styling for AI responses */
-        .ai-message p { margin-bottom: 0.5rem; }
-        .ai-message ul { list-style-type: disc; margin-left: 1.5rem; margin-bottom: 0.5rem; }
-        .ai-message li { margin-bottom: 0.25rem; }
-        .ai-message code { background: rgba(0,0,0,0.3); padding: 2px 4px; border-radius: 4px; font-family: monospace; }
-        .ai-message pre { background: rgba(0,0,0,0.5); padding: 10px; border-radius: 8px; overflow-x: auto; margin-bottom: 0.5rem; }
-        .ai-message strong { color: #60a5fa; font-weight: 600; }
+        .tab-shape::before, .tab-shape::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            width: 20px;
+            height: 10px;
+            border-radius: 0 0 10px 0; /* Corner smoothing */
+        }
+        
+        .active-tab {
+            background-color: white;
+            z-index: 10;
+        }
+        
+        .active-tab::before {
+            left: -10px;
+            background: radial-gradient(circle at 0 0, transparent 10px, white 10px);
+        }
+        
+        .active-tab::after {
+            right: -10px;
+            background: radial-gradient(circle at 100% 0, transparent 10px, white 10px);
+        }
+
+        .inactive-tab:hover {
+            background-color: #f3f4f6;
+        }
+
+        .omnibox-shadow:focus-within {
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+            background-color: white;
+            border-color: #3b82f6;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+        
+        .iframe-container {
+            width: 100%;
+            height: calc(100vh - 112px); /* Adjust for header height */
+            border: none;
+        }
     </style>
 </head>
-<body class="bg-gray-900 text-white overflow-hidden">
-    <div id="root"></div>
+<body class="bg-gray-100 h-screen w-screen flex flex-col">
+    <div id="root" class="h-full flex flex-col"></div>
 
-    <script type="text/babel" data-type="module">
-        import React, { useState, useEffect, useRef } from 'https://esm.sh/react@18.2.0';
-        import { createRoot } from 'https://esm.sh/react-dom@18.2.0/client';
-        import { 
-          Search, ArrowLeft, ArrowRight, RotateCcw, Plus, X, Maximize2, Minimize2, 
-          Grid, Globe, Star, Trash2, ExternalLink, Layout, Menu, Sparkles, 
-          MessageSquare, Bot, Send, Loader2, Calculator, TrendingUp, Delete, Home,
-          Brain, Settings, Key, Cpu, AlertCircle, Zap
-        } from 'https://esm.sh/lucide-react@0.263.1';
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
 
-        // --- Plugins / Favorites ---
-        const DEFAULT_FAVORITES = [
-          { id: 'ai', title: 'AI Chat', url: 'browser://ai-chat', icon: 'AI_ICON' },
-          { id: 'utility', title: 'Text Utility ✨', url: 'browser://text-utility', icon: 'UTILITY_ICON' },
-          { id: 'bing', title: 'Bing', url: 'https://www.bing.com/search?q=welcome', icon: 'https://www.bing.com/favicon.ico' },
-          { id: 'wiki', title: 'Wikipedia', url: 'https://www.wikipedia.org', icon: 'https://en.wikipedia.org/static/favicon/wikipedia.ico' },
-          { id: 'calc', title: 'Calculator', url: 'browser://calculator', icon: 'CALC_ICON' },
-          { id: 'graph', title: 'Graphing Calc', url: 'https://www.desmos.com/calculator?lang=en', icon: 'https://www.desmos.com/assets/img/touch-icon-192x192.png' },
-        ];
-
-        // --- Shared LLM Utility Function ---
-        const callGeminiApi = async (apiKey, model, systemInstruction, userPrompt, history = []) => {
-            if (!apiKey) throw new Error("API Key is missing. Please configure it in the AI Chat settings.");
-            
-            let contents = history.map(m => ({
-                role: m.role === 'user' ? 'user' : 'model',
-                parts: [{ text: m.text }]
-            }));
-
-            // Append the new user prompt
-            contents.push({ role: 'user', parts: [{ text: userPrompt }] });
-
-            const payload = {
-                contents: contents,
-                systemInstruction: { parts: [{ text: systemInstruction }] }
-            };
-
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-            const response = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            if (!response.ok) {
-                const errData = await response.json();
-                throw new Error(errData.error?.message || 'API Error');
-            }
-
-            const data = await response.json();
-            return data.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated.";
+        // --- Icons (SVGs) ---
+        const Icons = {
+            ArrowLeft: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>,
+            ArrowRight: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>,
+            RotateCw: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>,
+            Home: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
+            Star: () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>,
+            MoreVertical: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>,
+            Plus: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>,
+            X: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 18 18"/></svg>,
+            Search: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>,
+            Lock: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>,
+            Globe: () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" x2="22" y1="12" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>,
+            Puzzle: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19.439 15.424c-2.43 0-4.14-1.296-4.14-3.134 0-2.467 2.29-3.237 4.14-3.237a.8.8 0 0 0 .786-1.018l-1.07-4.162a.8.8 0 0 0-1.116-.54l-3.953 1.58c-.96.384-2.028.163-2.675-.713l-1.353-1.832a.8.8 0 0 0-1.218-.088l-3.208 3.208a.8.8 0 0 0-.088 1.218l1.832 1.353c.876.647 1.097 1.715.713 2.675l-1.58 3.953a.8.8 0 0 0 .54 1.116l4.162 1.07a.8.8 0 0 0 1.018-.786c0-1.85 .77-4.14 3.237-4.14 1.838 0 3.134 1.71 3.134 4.14a.8.8 0 0 0 .786 1.018l4.162-1.07a.8.8 0 0 0 .54-1.116l-1.58-3.953a.8.8 0 0 0-1.116-.54z"/></svg>,
+            UserCircle: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
         };
 
-        // --- Standalone AI Chat App Component ---
-        const AiChatApp = () => {
-            const [messages, setMessages] = useState([{ role: 'ai', text: "Hello! I'm your private AI assistant. Configure your API key in settings to start chatting." }]);
-            const [input, setInput] = useState('');
-            const [isLoading, setIsLoading] = useState(false);
-            const [showSettings, setShowSettings] = useState(false);
-            
-            // Settings State
-            const [apiKey, setApiKey] = useState('');
-            const [model, setModel] = useState('gemini-2.5-flash-preview-09-2025');
-            
-            const messagesEndRef = useRef(null);
+        const INITIAL_TAB_ID = 'tab-' + Date.now();
+        const DEFAULT_URL = 'chrome://newtab';
 
-            // Model List for Settings
-            const MODEL_OPTIONS = [
-                { label: 'Gemini 2.5 Flash Preview (Fast)', value: 'gemini-2.5-flash-preview-09-2025', group: 'Latest Previews' },
-                { label: 'Gemini 2.0 Flash Experimental', value: 'gemini-2.0-flash-exp', group: 'Experimental' },
-                { label: 'Gemini 1.5 Pro (Powerful)', value: 'gemini-1.5-pro', group: 'Production (1.5)' },
-                { label: 'Gemini 1.5 Flash (Fast)', value: 'gemini-1.5-flash', group: 'Production (1.5)' },
-                { label: 'Gemini 1.0 Pro (Legacy)', value: 'gemini-1.0-pro', group: 'Legacy (1.0)' },
+        // Helper to determine if URL is safe/valid for iframe
+        // Note: Real browsers block iframing for most major sites (Google, FB, etc.) due to X-Frame-Options.
+        // This is a limitation of the "web inside web" model.
+        const processUrl = (input) => {
+            if (!input) return DEFAULT_URL;
+            if (input.startsWith('chrome://')) return input;
+            
+            let url = input;
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                // If it looks like a domain, prepend https
+                if (url.includes('.') && !url.includes(' ')) {
+                    url = 'https://' + url;
+                } else {
+                    // It's a search query
+                    return `https://www.bing.com/search?q=${encodeURIComponent(url)}`;
+                }
+            }
+            return url;
+        };
+
+        // --- Internal Page Components ---
+
+        const NewTabPage = ({ onNavigate }) => {
+            const [query, setQuery] = useState('');
+
+            const handleSearch = (e) => {
+                e.preventDefault();
+                onNavigate(processUrl(query));
+            };
+
+            const shortcuts = [
+                { name: 'Wikipedia', url: 'https://www.wikipedia.org', icon: 'W', color: 'bg-gray-200' },
+                { name: 'Bing', url: 'https://www.bing.com', icon: 'B', color: 'bg-blue-100' },
+                { name: 'Example', url: 'https://www.example.com', icon: 'E', color: 'bg-green-100' },
+                { name: 'Learn React', url: 'https://react.dev', icon: 'R', color: 'bg-gray-800 text-white' }
             ];
-            
-            // Load Settings on Mount
-            useEffect(() => {
-                const storedKey = localStorage.getItem('pocket_ai_key');
-                const storedModel = localStorage.getItem('pocket_ai_model');
-                if (storedKey) setApiKey(storedKey);
-                if (storedModel) setModel(storedModel);
-                
-                if(!storedKey) setShowSettings(true);
-            }, []);
-
-            // Save Settings
-            const saveSettings = () => {
-                localStorage.setItem('pocket_ai_key', apiKey);
-                localStorage.setItem('pocket_ai_model', model);
-                setShowSettings(false);
-                if (messages.length === 1 && apiKey) {
-                    setMessages([{ role: 'ai', text: `Ready to chat using **${model}**! How can I help?` }]);
-                }
-            };
-
-            const scrollToBottom = () => {
-                messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-            };
-
-            useEffect(() => { scrollToBottom(); }, [messages]);
-
-            const handleSend = async () => {
-                if (!input.trim()) return;
-                if (!apiKey) {
-                    setShowSettings(true);
-                    return;
-                }
-
-                const userText = input;
-                setInput('');
-                setMessages(prev => [...prev, { role: 'user', text: userText }]);
-                setIsLoading(true);
-
-                try {
-                    const systemInstruction = "You are a helpful, private chat assistant named PocketBot. Keep your responses concise and well-formatted using markdown.";
-                    
-                    const aiText = await callGeminiApi(apiKey, model, systemInstruction, userText, messages);
-
-                    setMessages(prev => [...prev, { role: 'ai', text: aiText }]);
-                } catch (error) {
-                    setMessages(prev => [...prev, { role: 'ai', text: `Error: ${error.message}. Please check your API Key and Model selection.` }]);
-                } finally {
-                    setIsLoading(false);
-                }
-            };
-
-            const groupedModels = MODEL_OPTIONS.reduce((acc, option) => {
-                acc[option.group] = acc[option.group] || [];
-                acc[option.group].push(option);
-                return acc;
-            }, {});
 
             return (
-                <div className="w-full h-full flex flex-col bg-gray-900 relative">
-                    {/* Header */}
-                    <div className="h-14 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-4 shrink-0">
-                        <div className="flex items-center gap-2 font-bold text-lg text-blue-400">
-                            <Bot size={24} />
-                            <span>AI Chat</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <span className="text-[10px] bg-gray-700 px-2 py-1 rounded text-gray-300 font-mono hidden md:block">
-                                {model}
-                            </span>
-                            <button 
-                                onClick={() => setShowSettings(!showSettings)}
-                                className={`p-2 rounded-full transition-colors ${showSettings ? 'bg-blue-600 text-white' : 'hover:bg-gray-700 text-gray-400'}`}
-                            >
-                                <Settings size={20} />
-                            </button>
-                        </div>
+                <div className="flex flex-col items-center justify-center min-h-[80vh] bg-white animate-fade-in">
+                    <div className="mb-8 transform scale-125 font-bold text-5xl text-gray-700 tracking-tighter">
+                        <span className="text-blue-500">G</span>
+                        <span className="text-red-500">o</span>
+                        <span className="text-yellow-400">o</span>
+                        <span className="text-blue-500">g</span>
+                        <span className="text-green-500">l</span>
+                        <span className="text-red-500">e</span>
                     </div>
-
-                    {/* Settings Modal */}
-                    {showSettings && (
-                        <div className="absolute inset-0 z-20 bg-gray-900/95 backdrop-blur-sm flex items-center justify-center p-6">
-                            <div className="bg-gray-800 w-full max-w-md rounded-2xl border border-gray-700 p-6 shadow-2xl animate-fade-in">
-                                <h3 className="text-xl font-bold mb-4 flex items-center gap-2 text-white"><Settings size={20}/> AI Configuration</h3>
-                                
-                                <div className="space-y-5">
-                                    <div>
-                                        <label className="block text-xs text-blue-300 mb-1 uppercase font-bold tracking-wider">Google API Key</label>
-                                        <div className="relative">
-                                            <Key size={16} className="absolute left-3 top-3 text-gray-500" />
-                                            <input 
-                                                type="password" 
-                                                value={apiKey}
-                                                onChange={(e) => setApiKey(e.target.value)}
-                                                placeholder="Paste your Gemini API Key"
-                                                className="w-full bg-gray-900 border border-gray-600 rounded-lg py-2.5 pl-10 pr-4 text-white focus:ring-2 focus:ring-blue-500 outline-none placeholder-gray-600"
-                                            />
-                                        </div>
-                                        <p className="text-[10px] text-gray-500 mt-1">
-                                            Key is stored locally. Get one at <a href="https://aistudio.google.com/" target="_blank" className="text-blue-400 hover:underline">Google AI Studio</a>.
-                                        </p>
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-xs text-blue-300 mb-1 uppercase font-bold tracking-wider">Model Selection</label>
-                                        <div className="relative">
-                                            <Cpu size={16} className="absolute left-3 top-3 text-gray-500" />
-                                            <select 
-                                                value={model}
-                                                onChange={(e) => setModel(e.target.value)}
-                                                className="w-full bg-gray-900 border border-gray-600 rounded-lg py-2.5 pl-10 pr-4 text-white focus:ring-2 focus:ring-blue-500 outline-none appearance-none"
-                                            >
-                                                {Object.keys(groupedModels).map(group => (
-                                                    <optgroup key={group} label={group}>
-                                                        {groupedModels[group].map(option => (
-                                                            <option key={option.value} value={option.value}>{option.label}</option>
-                                                        ))}
-                                                    </optgroup>
-                                                ))}
-                                            </select>
-                                            <div className="absolute right-3 top-3 pointer-events-none">
-                                                <ArrowRight size={14} className="text-gray-500 rotate-90" />
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <button 
-                                        onClick={saveSettings}
-                                        className="w-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-bold py-3 rounded-xl transition-all mt-2 shadow-lg"
-                                    >
-                                        Save & Close
-                                    </button>
-                                </div>
+                    
+                    <form onSubmit={handleSearch} className="w-full max-w-xl px-4">
+                        <div className="relative group">
+                            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                <Icons.Search />
                             </div>
-                        </div>
-                    )}
-
-                    {/* Chat Area */}
-                    <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
-                        {messages.map((msg, idx) => (
-                            <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                <div 
-                                    className={`
-                                    max-w-[85%] p-4 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ai-message shadow-md
-                                    ${msg.role === 'user' 
-                                        ? 'bg-blue-600 text-white rounded-br-none' 
-                                        : 'bg-gray-800 text-gray-200 rounded-bl-none border border-gray-700'}
-                                `}
-                                    dangerouslySetInnerHTML={{ __html: msg.text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br/>') }}
-                                />
-                            </div>
-                        ))}
-                        {isLoading && (
-                            <div className="flex justify-start">
-                                <div className="bg-gray-800 p-4 rounded-2xl rounded-bl-none border border-gray-700 flex items-center gap-2">
-                                    <Loader2 size={16} className="animate-spin text-blue-400" />
-                                    <span className="text-gray-400 text-xs">Thinking...</span>
-                                </div>
-                            </div>
-                        )}
-                        <div ref={messagesEndRef} />
-                    </div>
-
-                    {/* Input Area */}
-                    <div className="p-4 bg-gray-800 border-t border-gray-700 shrink-0">
-                        <div className="flex gap-2 relative">
                             <input
                                 type="text"
-                                value={input}
-                                onChange={(e) => setInput(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                                placeholder={`Message ${model}...`}
-                                disabled={isLoading}
-                                className="w-full bg-gray-900 border border-gray-600 text-white rounded-full py-3 pl-5 pr-12 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 transition-all placeholder-gray-500"
+                                value={query}
+                                onChange={(e) => setQuery(e.target.value)}
+                                className="w-full py-3 pl-12 pr-12 text-gray-700 bg-white border border-gray-200 rounded-full shadow-sm hover:shadow-md focus:shadow-md focus:outline-none transition-shadow"
+                                placeholder="Search Google or type a URL"
+                                autoFocus
                             />
+                            <div className="absolute inset-y-0 right-0 pr-4 flex items-center cursor-pointer">
+                                <img src="https://www.gstatic.com/images/branding/googlemic/2x/googlemic_color_24dp.png" alt="voice" className="h-6" />
+                            </div>
+                        </div>
+                    </form>
+
+                    <div className="grid grid-cols-4 gap-4 mt-8">
+                        {shortcuts.map((site) => (
                             <button 
-                                onClick={handleSend}
-                                disabled={isLoading || !input.trim()}
-                                className="absolute right-1 top-1 p-2 bg-blue-600 text-white rounded-full disabled:bg-gray-700 disabled:text-gray-500 hover:bg-blue-500 transition-colors"
+                                key={site.url}
+                                onClick={() => onNavigate(site.url)}
+                                className="flex flex-col items-center p-4 rounded-lg hover:bg-gray-100 transition-colors gap-3"
                             >
-                                <ArrowRight size={20} />
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            );
-        };
-
-        // --- Standalone Text Utility App Component ---
-        const TextUtilityApp = () => {
-            const [sourceText, setSourceText] = useState('');
-            const [outputText, setOutputText] = useState('');
-            const [isLoading, setIsLoading] = useState(false);
-            const [error, setError] = useState(null);
-
-            // Get API key and model from localStorage
-            const apiKey = localStorage.getItem('pocket_ai_key');
-            const model = localStorage.getItem('pocket_ai_model') || 'gemini-2.5-flash-preview-09-2025';
-
-            const handleLLMAction = async (actionType) => {
-                if (!sourceText.trim()) {
-                    setError("Please enter text to process.");
-                    return;
-                }
-                if (!apiKey) {
-                    setError("API Key is not configured. Please go to AI Chat settings to set it.");
-                    return;
-                }
-                setError(null);
-                setIsLoading(true);
-                setOutputText('');
-
-                const systemPromptMap = {
-                    summarize: "You are a professional summarization assistant. Provide a concise, neutral summary of the following text in exactly one paragraph.",
-                    keywords: "You are a keyword extraction tool. Identify and list the top 10 most relevant keywords and key phrases from the following text. Respond only with a comma-separated list or a bulleted list.",
-                    rewrite_professional: "You are a professional editor. Rewrite the following text to sound highly professional, articulate, and suitable for a formal report or business communication. Do not add any introductory or concluding phrases, only provide the rewritten text.",
-                    rewrite_simple: "You are a language simplifier. Rewrite the following complex text in simple, clear, and easy-to-read language. Do not add any introductory or concluding phrases, only provide the rewritten text.",
-                };
-                
-                try {
-                    const systemInstruction = systemPromptMap[actionType];
-                    const prompt = `Text to process: """${sourceText}"""`;
-                    
-                    const resultText = await callGeminiApi(apiKey, model, systemInstruction, prompt);
-                    setOutputText(resultText);
-
-                } catch (err) {
-                    setError(`Error during API call: ${err.message}`);
-                    setOutputText('');
-                } finally {
-                    setIsLoading(false);
-                }
-            };
-
-            const actionButtons = [
-                { type: 'summarize', label: 'Summarize ✨', icon: TrendingUp, color: 'blue' },
-                { type: 'keywords', label: 'Keywords ✨', icon: Zap, color: 'purple' },
-                { type: 'rewrite_professional', label: 'Professionalize ✨', icon: Brain, color: 'emerald' },
-                { type: 'rewrite_simple', label: 'Simplify ✨', icon: Star, color: 'amber' },
-            ];
-
-            return (
-                <div className="w-full h-full flex flex-col bg-gray-900 p-6 overflow-hidden">
-                    <h2 className="text-3xl font-bold text-blue-400 mb-6 flex items-center gap-2">
-                        <TrendingUp size={28} /> Text Utility
-                    </h2>
-                    
-                    {/* Input and Output Area */}
-                    <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 overflow-hidden pb-6">
-                        
-                        {/* Source Text Input */}
-                        <div className="flex flex-col h-full">
-                            <label className="text-sm font-semibold mb-2 text-gray-300">Source Text</label>
-                            <textarea
-                                value={sourceText}
-                                onChange={(e) => {setSourceText(e.target.value); setError(null);}}
-                                placeholder="Paste your text here..."
-                                className="flex-1 bg-gray-800 border border-gray-700 rounded-xl p-4 text-white focus:ring-2 focus:ring-blue-500 outline-none resize-none scrollbar-hide"
-                            />
-                        </div>
-
-                        {/* Output Text Display */}
-                        <div className="flex flex-col h-full">
-                            <label className="text-sm font-semibold mb-2 text-gray-300">Result</label>
-                            <div className="flex-1 bg-gray-800 border border-gray-700 rounded-xl p-4 text-gray-200 overflow-y-auto ai-message scrollbar-hide">
-                                {isLoading ? (
-                                    <div className="flex items-center justify-center h-full text-blue-400">
-                                        <Loader2 size={24} className="animate-spin mr-2" /> Processing...
-                                    </div>
-                                ) : outputText ? (
-                                    <div dangerouslySetInnerHTML={{ __html: outputText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br/>') }} />
-                                ) : error ? (
-                                    <div className="text-red-400 flex items-center gap-2">
-                                        <AlertCircle size={20} /> {error}
-                                    </div>
-                                ) : (
-                                    <p className="text-gray-500">Output will appear here after processing.</p>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="shrink-0 flex flex-wrap gap-4 justify-center bg-gray-900 pt-4 border-t border-gray-800">
-                        {!apiKey && (
-                            <div className="text-red-400 text-sm p-2 rounded-lg bg-gray-800 border border-red-700 flex items-center gap-2">
-                                <AlertCircle size={18} /> API Key required.
-                            </div>
-                        )}
-                        {actionButtons.map(btn => (
-                            <button
-                                key={btn.type}
-                                onClick={() => handleLLMAction(btn.type)}
-                                disabled={isLoading || !sourceText.trim() || !apiKey}
-                                className={`
-                                    flex items-center gap-2 px-6 py-3 rounded-full font-bold text-sm shadow-lg transition-all transform hover:scale-[1.02]
-                                    disabled:bg-gray-700 disabled:text-gray-500 disabled:shadow-none
-                                    bg-${btn.color}-600 text-white hover:bg-${btn.color}-500
-                                `}
-                            >
-                                <btn.icon size={18} /> {btn.label}
+                                <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold ${site.color}`}>
+                                    {site.icon}
+                                </div>
+                                <span className="text-sm text-gray-700">{site.name}</span>
                             </button>
                         ))}
                     </div>
+                    
+                    <div className="mt-12 p-4 bg-yellow-50 border border-yellow-200 rounded-lg max-w-2xl text-sm text-yellow-800">
+                        <strong>Developer Note:</strong> This is a browser simulation ("clone") running inside a browser. 
+                        Many modern websites (like Google.com, YouTube) have security settings (`X-Frame-Options`) that prevent them from loading inside this window. 
+                        Try <strong>Wikipedia</strong>, <strong>Bing</strong>, or <strong>Example.com</strong> for best results.
+                    </div>
                 </div>
             );
         };
 
+        const EmptyState = ({ url }) => (
+            <div className="flex flex-col items-center justify-center h-full bg-white text-gray-500">
+                <div className="text-6xl mb-4">☹</div>
+                <h2 className="text-xl font-medium text-gray-800">This content is blocked.</h2>
+                <p className="mt-2 max-w-md text-center">
+                    The website <strong>{url}</strong> does not allow itself to be displayed in a frame (Cross-Origin Policy). 
+                </p>
+                <a href={url} target="_blank" className="mt-4 text-blue-600 hover:underline">Open in real tab instead</a>
+            </div>
+        );
 
-        // --- Calculator Component ---
-        const BuiltInCalculator = () => {
-            const [display, setDisplay] = useState('0');
-            const [equation, setEquation] = useState('');
+        // --- Main App Component ---
 
-            const handleInput = (val) => {
-                if (val === 'C') {
-                    setDisplay('0');
-                    setEquation('');
-                } else if (val === '=') {
-                    try {
-                        // eslint-disable-next-line no-eval
-                        const res = eval(equation.replace(/×/g, '*').replace(/÷/g, '/'));
-                        setDisplay(String(res));
-                        setEquation(String(res));
-                    } catch {
-                        setDisplay('Error');
-                        setEquation('');
-                    }
+        const App = () => {
+            const [tabs, setTabs] = useState([{ 
+                id: INITIAL_TAB_ID, 
+                title: 'New Tab', 
+                url: DEFAULT_URL, 
+                history: [DEFAULT_URL], 
+                historyIndex: 0,
+                favicon: null
+            }]);
+            const [activeTabId, setActiveTabId] = useState(INITIAL_TAB_ID);
+            const [urlInput, setUrlInput] = useState('');
+            const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+            // Get active tab object
+            const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
+
+            useEffect(() => {
+                // Update URL bar when switching tabs
+                if (activeTab.url === DEFAULT_URL) {
+                    setUrlInput('');
                 } else {
-                    const newEq = equation === '0' ? val : equation + val;
-                    setEquation(newEq);
-                    setDisplay(newEq);
+                    setUrlInput(activeTab.url);
+                }
+            }, [activeTabId, activeTab.url]);
+
+            const createTab = () => {
+                const newId = 'tab-' + Date.now();
+                setTabs([...tabs, { 
+                    id: newId, 
+                    title: 'New Tab', 
+                    url: DEFAULT_URL, 
+                    history: [DEFAULT_URL],
+                    historyIndex: 0
+                }]);
+                setActiveTabId(newId);
+            };
+
+            const closeTab = (e, tabId) => {
+                e.stopPropagation();
+                if (tabs.length === 1) {
+                    // Don't close last tab, just reset it
+                    updateTab(tabId, { url: DEFAULT_URL, title: 'New Tab', history: [DEFAULT_URL], historyIndex: 0 });
+                    return;
+                }
+                
+                const newTabs = tabs.filter(t => t.id !== tabId);
+                setTabs(newTabs);
+                if (activeTabId === tabId) {
+                    setActiveTabId(newTabs[newTabs.length - 1].id);
                 }
             };
 
-            const btns = [
-                'C', '(', ')', '÷',
-                '7', '8', '9', '×',
-                '4', '5', '6', '-',
-                '1', '2', '3', '+',
-                '0', '.', '=',
-            ];
+            const updateTab = (id, updates) => {
+                setTabs(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+            };
+
+            const navigateTo = (url) => {
+                const processedUrl = processUrl(url);
+                
+                // Update History
+                const newHistory = activeTab.history.slice(0, activeTab.historyIndex + 1);
+                newHistory.push(processedUrl);
+
+                updateTab(activeTabId, { 
+                    url: processedUrl, 
+                    title: processedUrl.replace('https://', '').replace('http://', '').split('/')[0] || 'Page',
+                    history: newHistory,
+                    historyIndex: newHistory.length - 1
+                });
+            };
+
+            const goBack = () => {
+                if (activeTab.historyIndex > 0) {
+                    const newIndex = activeTab.historyIndex - 1;
+                    const newUrl = activeTab.history[newIndex];
+                    updateTab(activeTabId, { url: newUrl, historyIndex: newIndex });
+                }
+            };
+
+            const goForward = () => {
+                if (activeTab.historyIndex < activeTab.history.length - 1) {
+                    const newIndex = activeTab.historyIndex + 1;
+                    const newUrl = activeTab.history[newIndex];
+                    updateTab(activeTabId, { url: newUrl, historyIndex: newIndex });
+                }
+            };
+
+            const handleUrlSubmit = (e) => {
+                e.preventDefault();
+                navigateTo(urlInput);
+            };
+
+            const handleIframeLoad = (e) => {
+                // Try to extract title if same-origin (unlikely for external sites, but good practice)
+                try {
+                    const title = e.target.contentDocument.title;
+                    if (title) updateTab(activeTabId, { title });
+                } catch (err) {
+                    // Cross-origin error expected
+                }
+            };
 
             return (
-                <div className="w-full h-full flex items-center justify-center bg-gray-800">
-                    <div className="w-full max-w-sm bg-gray-900 p-6 rounded-2xl shadow-2xl border border-gray-700">
-                        <div className="mb-4 p-4 bg-gray-800 rounded-xl text-right">
-                            <div className="text-3xl font-mono text-white truncate">{display}</div>
-                        </div>
-                        <div className="grid grid-cols-4 gap-3">
-                            {btns.map((btn, i) => (
-                                <button
-                                    key={i}
-                                    onClick={() => handleInput(btn)}
-                                    className={`calc-btn p-4 rounded-xl font-bold text-lg ${
-                                        btn === '=' ? 'bg-blue-600 text-white col-span-2' : 
-                                        ['C', '(', ')', '÷', '×', '-', '+'].includes(btn) ? 'bg-gray-700 text-blue-300' : 'bg-gray-800 text-white hover:bg-gray-700'
-                                    }`}
+                <div className="flex flex-col h-full bg-[#dfe9f3]">
+                    {/* --- Title Bar / Tabs --- */}
+                    <div className="flex pt-2 px-2 gap-1 items-end overflow-x-auto select-none" style={{ background: '#dfe9f3' }}>
+                        {tabs.map(tab => (
+                            <div 
+                                key={tab.id}
+                                onClick={() => setActiveTabId(tab.id)}
+                                className={`
+                                    group relative flex items-center min-w-[160px] max-w-[240px] h-[34px] px-3 text-xs 
+                                    cursor-default transition-all duration-100 tab-shape
+                                    ${activeTabId === tab.id ? 'active-tab text-gray-800' : 'inactive-tab text-gray-600'}
+                                `}
+                            >
+                                <div className="flex items-center gap-2 flex-1 overflow-hidden">
+                                    {tab.url === DEFAULT_URL ? <Icons.ArrowRight /> : <Icons.Globe />} 
+                                    <span className="truncate flex-1">{tab.title}</span>
+                                </div>
+                                <button 
+                                    onClick={(e) => closeTab(e, tab.id)}
+                                    className={`ml-1 p-1 rounded-full hover:bg-gray-200 ${activeTabId === tab.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
                                 >
-                                    {btn}
+                                    <Icons.X />
                                 </button>
-                            ))}
+                            </div>
+                        ))}
+                        <button 
+                            onClick={createTab}
+                            className="p-1.5 ml-1 rounded-full hover:bg-gray-300 text-gray-700 transition-colors"
+                        >
+                            <Icons.Plus />
+                        </button>
+                    </div>
+
+                    {/* --- Navigation Bar --- */}
+                    <div className="bg-white px-2 py-1.5 flex items-center gap-2 border-b border-gray-200 shadow-sm z-20">
+                        <div className="flex gap-1 text-gray-600">
+                            <button onClick={goBack} disabled={activeTab.historyIndex === 0} className="p-1.5 rounded-full hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent">
+                                <Icons.ArrowLeft />
+                            </button>
+                            <button onClick={goForward} disabled={activeTab.historyIndex === activeTab.history.length - 1} className="p-1.5 rounded-full hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent">
+                                <Icons.ArrowRight />
+                            </button>
+                            <button onClick={() => navigateTo(activeTab.url)} className="p-1.5 rounded-full hover:bg-gray-100">
+                                <Icons.RotateCw />
+                            </button>
                         </div>
-                    </div>
-                </div>
-            );
-        };
 
-        const BrowserApp = () => {
-          // --- State ---
-          const [tabs, setTabs] = useState([{ id: 1, title: 'New Tab', url: 'about:blank', isNewTab: true }]);
-          const [activeTabId, setActiveTabId] = useState(1);
-          const [urlInput, setUrlInput] = useState('');
-          const [favorites, setFavorites] = useState(DEFAULT_FAVORITES);
-          const [showTabSwitcher, setShowTabSwitcher] = useState(false);
-          const [isFullscreen, setIsFullscreen] = useState(false);
-          
-          // Refs
-          const containerRef = useRef(null);
-
-          // --- Effects ---
-          useEffect(() => {
-            const saved = localStorage.getItem('browser_favorites');
-            if (saved) {
-              try { setFavorites(JSON.parse(saved)); } catch(e) {}
-            }
-          }, []);
-
-          useEffect(() => {
-            localStorage.setItem('browser_favorites', JSON.stringify(favorites));
-          }, [favorites]);
-
-          useEffect(() => {
-            const activeTab = tabs.find(t => t.id === activeTabId);
-            if (activeTab) {
-              let displayUrl = activeTab.url;
-              if(activeTab.isNewTab) displayUrl = '';
-              else if (activeTab.url === 'browser://calculator') displayUrl = 'Calculator';
-              else if (activeTab.url === 'browser://ai-chat') displayUrl = 'AI Chat';
-              else if (activeTab.url === 'browser://text-utility') displayUrl = 'Text Utility';
-              
-              setUrlInput(displayUrl);
-            }
-          }, [activeTabId, tabs]);
-
-          useEffect(() => {
-            const handleFullscreenChange = () => {
-                setIsFullscreen(!!document.fullscreenElement);
-            };
-            document.addEventListener('fullscreenchange', handleFullscreenChange);
-            return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-          }, []);
-
-          // --- Logic ---
-
-          const createNewTab = (url = 'about:blank', isNewTab = true) => {
-            const newId = Date.now();
-            let title = isNewTab ? 'New Tab' : 'Loading...';
-            if (url === 'browser://calculator') title = 'Calculator';
-            if (url === 'browser://ai-chat') title = 'AI Chat';
-            if (url === 'browser://text-utility') title = 'Text Utility';
-            
-            const newTab = { id: newId, title, url, isNewTab };
-            setTabs(prev => [...prev, newTab]);
-            setActiveTabId(newId);
-            setShowTabSwitcher(false);
-            return newId;
-          };
-
-          const closeTab = (e, id) => {
-            e.stopPropagation();
-            const remaining = tabs.filter(t => t.id !== id);
-            if (remaining.length === 0) {
-              setTabs([{ id: Date.now(), title: 'New Tab', url: 'about:blank', isNewTab: true }]);
-            } else {
-              setTabs(remaining);
-              if (activeTabId === id) {
-                setActiveTabId(remaining[remaining.length - 1].id);
-              }
-            }
-          };
-
-          const processUrl = (input) => {
-            let url = input.trim();
-            if (!url) return null;
-            
-            const lower = url.toLowerCase();
-            if (lower === 'calculator') return 'browser://calculator';
-            if (lower === 'ai' || lower === 'chat') return 'browser://ai-chat';
-            if (lower === 'utility' || lower === 'text utility') return 'browser://text-utility';
-
-            if (!url.includes('.') || url.includes(' ')) {
-              return `https://www.bing.com/search?q=${encodeURIComponent(url)}`;
-            }
-            if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('browser://')) {
-              url = 'https://' + url;
-            }
-
-            // --- VIDEO EMBED LOGIC ---
-            try {
-              const urlObj = new URL(url);
-              
-              // Youtube Logic
-              if (urlObj.hostname.includes('youtube.com') || urlObj.hostname.includes('youtu.be')) {
-                let videoId = null;
-                if (urlObj.hostname.includes('youtu.be')) {
-                    videoId = urlObj.pathname.substring(1);
-                } else if (urlObj.searchParams.get('v')) {
-                    videoId = urlObj.searchParams.get('v');
-                } else if (urlObj.pathname.startsWith('/embed/')) {
-                    return url;
-                }
-
-                if (videoId) {
-                    return `https://www.youtube.com/embed/${videoId}?autoplay=1`;
-                }
-              }
-
-              // Vimeo Logic
-              if (urlObj.hostname.includes('vimeo.com')) {
-                 const pathParts = urlObj.pathname.split('/');
-                 const videoId = pathParts[pathParts.length - 1];
-                 if (videoId && !isNaN(videoId)) return `https://player.vimeo.com/video/${videoId}`;
-              }
-            } catch (e) {}
-            return url;
-          };
-
-          const handleNavigate = (e) => {
-            e.preventDefault();
-            const finalUrl = processUrl(urlInput);
-            if (!finalUrl) return;
-            updateTab(activeTabId, { url: finalUrl, title: finalUrl, isNewTab: false });
-          };
-
-          const updateTab = (id, updates) => {
-            setTabs(tabs.map(t => t.id === id ? { ...t, ...updates } : t));
-          };
-
-          const toggleFullscreen = () => {
-            if (!document.fullscreenElement) {
-              containerRef.current.requestFullscreen().catch(err => console.log(err));
-            } else {
-              document.exitFullscreen();
-            }
-          };
-
-          const handleDrop = (e) => {
-            e.preventDefault();
-            const data = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text");
-            if (data) {
-                const processed = processUrl(data);
-                if (processed) {
-                    createNewTab(processed, false);
-                }
-            }
-          };
-
-          const handleDragOver = (e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'link';
-          };
-
-          // --- Components ---
-
-          const TabCard = ({ tab }) => (
-            <div 
-              onClick={() => {
-                setActiveTabId(tab.id);
-                setShowTabSwitcher(false);
-              }}
-              className={`
-                relative flex flex-col h-40 bg-gray-800 rounded-xl overflow-hidden border-2 cursor-pointer shadow-lg
-                ${activeTabId === tab.id ? 'border-blue-500' : 'border-gray-700'}
-              `}
-            >
-              <div className="bg-gray-900 p-2 flex justify-between items-center border-b border-gray-700">
-                 <div className="flex items-center gap-2 truncate text-xs text-gray-300">
-                    <span className="truncate max-w-[100px]">{tab.title}</span>
-                 </div>
-                 <button onClick={(e) => closeTab(e, tab.id)} className="p-1 hover:bg-gray-700 rounded-full">
-                    <X size={14} className="text-gray-400" />
-                 </button>
-              </div>
-              <div className="flex-1 bg-gray-800 flex items-center justify-center text-gray-600">
-                {tab.url === 'browser://calculator' ? <Calculator size={32} /> : 
-                 tab.url === 'browser://ai-chat' ? <Bot size={32} className="text-blue-400"/> :
-                 tab.url === 'browser://text-utility' ? <TrendingUp size={32} className="text-emerald-400"/> :
-                 tab.isNewTab ? <Layout size={32} /> : <Globe size={32} />}
-              </div>
-            </div>
-          );
-
-          const NewTabPage = () => (
-            <div className="w-full h-full bg-gray-900 text-white flex flex-col items-center p-6 overflow-y-auto">
-              <div className="max-w-2xl w-full flex flex-col items-center gap-8 mt-10">
-                <h1 className="text-4xl font-light tracking-wider mb-2 text-blue-400">browser<span className="font-bold text-white">lite</span></h1>
-                
-                {/* Search Bar */}
-                <div className="w-full relative group">
-                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                     <Search size={20} className="text-gray-500" />
-                   </div>
-                   <input 
-                     type="text" 
-                     placeholder="Search or enter address..."
-                     className="w-full bg-gray-800 border border-gray-700 text-white rounded-full py-3 pl-10 pr-12 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-lg transition-all"
-                     onChange={(e) => setUrlInput(e.target.value)}
-                     onKeyDown={(e) => { if (e.key === 'Enter') handleNavigate(e); }}
-                     onDrop={handleDrop}
-                     onDragOver={handleDragOver}
-                   />
-                </div>
-
-                {/* Favorites Grid */}
-                <div className="grid grid-cols-4 gap-4 w-full">
-                  {favorites.map(fav => (
-                    <div 
-                       key={fav.id}
-                       draggable
-                       onDragStart={(e) => e.dataTransfer.setData("text", fav.url)}
-                       className="flex flex-col items-center gap-2 cursor-pointer group"
-                       onClick={() => fav.url ? updateTab(activeTabId, { url: fav.url, title: fav.title, isNewTab: false }) : null}
-                    >
-                       <div className="w-12 h-12 bg-gray-800 rounded-full flex items-center justify-center p-2 border border-gray-700 group-hover:border-blue-400 transition-colors shadow-sm overflow-hidden relative">
-                         {fav.icon === 'CALC_ICON' ? <Calculator className="text-blue-400" /> : 
-                          fav.icon === 'AI_ICON' ? <Bot className="text-blue-400" /> :
-                          fav.icon === 'UTILITY_ICON' ? <TrendingUp className="text-emerald-400" /> :
-                          <img src={fav.icon} alt={fav.title} className="w-6 h-6 object-contain" onError={(e) => {e.target.style.display='none';}}/>
-                         }
-                       </div>
-                       <span className="text-xs text-gray-400 group-hover:text-white truncate max-w-[80px] text-center">{fav.title}</span>
-                    </div>
-                  ))}
-                  
-                   <div 
-                     className="flex flex-col items-center gap-2 cursor-pointer group"
-                     onClick={() => {
-                         const url = prompt("Enter URL:");
-                         if(url) {
-                            const title = prompt("Enter Title:") || "Site";
-                            setFavorites([...favorites, { id: Date.now(), title, url: processUrl(url), icon: `https://www.google.com/s2/favicons?domain=${url}` }]);
-                         }
-                     }}
-                   >
-                      <div className="w-12 h-12 bg-gray-800 rounded-full flex items-center justify-center border border-dashed border-gray-600 group-hover:border-blue-400 text-gray-500 group-hover:text-white transition-all">
-                          <Plus size={20} />
-                      </div>
-                      <span className="text-xs text-gray-500 group-hover:text-white">Add</span>
-                   </div>
-                </div>
-              </div>
-            </div>
-          );
-
-          return (
-            <div ref={containerRef} className="flex h-screen w-full bg-gray-900 text-gray-100 overflow-hidden font-sans flex-col">
-              
-              {/* Fullscreen Exit Button */}
-              {isFullscreen && (
-                  <button 
-                    onClick={toggleFullscreen}
-                    className="absolute top-4 right-4 z-50 bg-gray-900/80 backdrop-blur text-white px-4 py-2 rounded-full border border-gray-700 hover:bg-gray-800 shadow-lg flex items-center gap-2 animate-fade-in"
-                  >
-                    <Minimize2 size={16} /> Exit Fullscreen
-                  </button>
-              )}
-
-              {/* Main Content Area */}
-              <div className="flex-1 relative w-full overflow-hidden bg-white">
-                    {/* Tab Switcher */}
-                    {showTabSwitcher ? (
-                        <div className="absolute inset-0 bg-gray-900 z-40 p-4 overflow-y-auto animate-fade-in">
-                            <div className="flex justify-between items-center mb-6">
-                                <h2 className="text-xl font-bold text-white">Tabs ({tabs.length})</h2>
-                                <div className="flex gap-2">
-                                    <button onClick={() => setShowTabSwitcher(false)} className="px-4 py-2 bg-gray-800 text-white rounded-lg text-sm">Cancel</button>
-                                    <button onClick={() => createNewTab()} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm flex items-center gap-2"><Plus size={16} /> New</button>
+                        <form onSubmit={handleUrlSubmit} className="flex-1 flex">
+                            <div className="omnibox-shadow flex items-center w-full bg-gray-100 rounded-full px-3 py-1.5 border border-transparent transition-all">
+                                <div className="mr-2 text-gray-500">
+                                    {activeTab.url.startsWith('https') ? <Icons.Lock /> : (activeTab.url === DEFAULT_URL ? <Icons.Search /> : <Icons.Globe />)}
+                                </div>
+                                <input 
+                                    type="text" 
+                                    value={urlInput}
+                                    onChange={(e) => setUrlInput(e.target.value)}
+                                    onFocus={(e) => e.target.select()}
+                                    className="flex-1 bg-transparent border-none outline-none text-sm text-gray-700"
+                                    placeholder="Search Google or type a URL"
+                                />
+                                <div className="ml-2">
+                                    <Icons.Star />
                                 </div>
                             </div>
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pb-20">
-                                {tabs.map(tab => <TabCard key={tab.id} tab={tab} />)}
-                            </div>
-                        </div>
-                    ) : null}
+                        </form>
 
-                    {/* Tabs */}
-                    {tabs.map(tab => {
-                        const isActive = (tab.id === activeTabId && !showTabSwitcher);
-                        return (
+                        <div className="flex gap-1 text-gray-600 relative">
+                             {/* Extensions area simulation */}
+                            <button className="p-1.5 rounded-full hover:bg-gray-100">
+                                <Icons.Puzzle />
+                            </button>
+                            
+                             {/* Profile */}
+                            <button className="p-1 rounded-full hover:bg-gray-100">
+                                <Icons.UserCircle />
+                            </button>
+
+                            {/* Menu */}
+                            <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="p-1.5 rounded-full hover:bg-gray-100">
+                                <Icons.MoreVertical />
+                            </button>
+                            
+                            {isMenuOpen && (
+                                <div className="absolute top-10 right-0 w-64 bg-white rounded-lg shadow-xl border py-2 text-sm text-gray-700 z-50">
+                                    <div className="px-4 py-2 hover:bg-gray-100 cursor-pointer flex justify-between">
+                                        <span>New Tab</span>
+                                        <span className="text-gray-400">Ctrl+T</span>
+                                    </div>
+                                    <div className="px-4 py-2 hover:bg-gray-100 cursor-pointer flex justify-between">
+                                        <span>New Window</span>
+                                        <span className="text-gray-400">Ctrl+N</span>
+                                    </div>
+                                    <div className="h-px bg-gray-200 my-1"></div>
+                                    <div className="px-4 py-2 hover:bg-gray-100 cursor-pointer flex justify-between">
+                                        <span>History</span>
+                                    </div>
+                                    <div className="px-4 py-2 hover:bg-gray-100 cursor-pointer flex justify-between">
+                                        <span>Downloads</span>
+                                    </div>
+                                    <div className="px-4 py-2 hover:bg-gray-100 cursor-pointer flex justify-between">
+                                        <span>Bookmarks</span>
+                                    </div>
+                                    <div className="h-px bg-gray-200 my-1"></div>
+                                    <div className="px-4 py-2 hover:bg-gray-100 cursor-pointer flex justify-between">
+                                        <span>Settings</span>
+                                    </div>
+                                    <div className="px-4 py-2 hover:bg-gray-100 cursor-pointer flex justify-between" onClick={() => setIsMenuOpen(false)}>
+                                        <span>Help</span>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    
+                    {/* --- Bookmarks Bar --- */}
+                    <div className="bg-white px-3 py-1 flex items-center gap-4 text-xs text-gray-600 border-b border-gray-200">
+                        <button onClick={() => navigateTo(DEFAULT_URL)} className="hover:bg-gray-200 px-2 py-1 rounded flex items-center gap-1">
+                            <span className="w-3 h-3 rounded-full bg-blue-400"></span> New Tab
+                        </button>
+                        <button onClick={() => navigateTo('https://www.wikipedia.org')} className="hover:bg-gray-200 px-2 py-1 rounded flex items-center gap-1">
+                            <img src="https://www.wikipedia.org/static/favicon/wikipedia.ico" className="w-3 h-3" alt="" /> Wikipedia
+                        </button>
+                        <button onClick={() => navigateTo('https://bing.com')} className="hover:bg-gray-200 px-2 py-1 rounded flex items-center gap-1">
+                            <span className="w-3 h-3 rounded-full bg-blue-600"></span> Bing
+                        </button>
+                        <button onClick={() => navigateTo('https://archive.org')} className="hover:bg-gray-200 px-2 py-1 rounded flex items-center gap-1">
+                            <span className="w-3 h-3 rounded-full bg-gray-600"></span> Archive
+                        </button>
+                    </div>
+
+                    {/* --- Viewport (Content) --- */}
+                    <div className="flex-1 relative bg-white">
+                        {tabs.map(tab => (
                             <div 
                                 key={tab.id} 
-                                className={`w-full h-full absolute inset-0 bg-white ${isActive ? 'z-10 opacity-100 pointer-events-auto' : 'z-0 opacity-0 pointer-events-none'}`}
-                                style={{ display: isActive ? 'block' : 'none' }} 
+                                className={`absolute inset-0 w-full h-full ${activeTabId === tab.id ? 'block' : 'hidden'}`}
                             >
-                                {tab.url === 'browser://calculator' ? (
-                                    <BuiltInCalculator />
-                                ) : tab.url === 'browser://ai-chat' ? (
-                                    <AiChatApp />
-                                ) : tab.url === 'browser://text-utility' ? (
-                                    <TextUtilityApp />
-                                ) : tab.isNewTab ? (
-                                    <NewTabPage />
+                                {tab.url === DEFAULT_URL ? (
+                                    <NewTabPage onNavigate={navigateTo} />
                                 ) : (
-                                    <iframe
+                                    <iframe 
                                         src={tab.url}
-                                        className="w-full h-full border-none"
-                                        title={`Tab ${tab.id}`}
-                                        sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-presentation"
-                                        allowFullScreen
+                                        className="iframe-container"
+                                        onLoad={handleIframeLoad}
+                                        sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
                                     />
                                 )}
                             </div>
-                        );
-                    })}
-              </div>
-
-              {/* Bottom Nav */}
-              {!isFullscreen && (
-                 <div className="h-16 bg-gray-800 border-t border-gray-700 flex items-center justify-between px-2 gap-2 z-40 shrink-0">
-                      
-                      {/* Tab Switcher Button */}
-                      <button 
-                        className="p-2 text-gray-400 hover:text-white flex flex-col items-center justify-center" 
-                        onClick={() => setShowTabSwitcher(!showTabSwitcher)}
-                      >
-                          <div className="w-5 h-5 border-2 border-current rounded flex items-center justify-center text-[10px] font-bold">
-                             {tabs.length}
-                          </div>
-                      </button>
-                      
-                      {/* Navigation & Address Bar */}
-                      <div className="flex-1 relative flex items-center gap-2">
-                           {/* Back Button */}
-                           <button 
-                             onClick={() => {
-                                const el = document.querySelector(`iframe[src="${tabs.find(t=>t.id===activeTabId)?.url}"]`);
-                                try { el?.contentWindow.history.back(); } catch(e){}
-                             }} 
-                             className="hidden md:block p-2 text-gray-400 hover:text-white"
-                           >
-                             <ArrowLeft size={18} />
-                           </button>
-
-                           <input 
-                            type="text" 
-                            value={urlInput}
-                            onChange={(e) => setUrlInput(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleNavigate(e)}
-                            onDrop={handleDrop}
-                            onDragOver={handleDragOver}
-                            placeholder="Search or drop link here"
-                            className="w-full bg-gray-900 border border-gray-700 text-gray-200 text-sm rounded-full py-2 pl-4 pr-10 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                          />
-                      </div>
-
-    
-                  {/* New Tab Button */}
-                      <button onClick={() => createNewTab()} className="p-2 text-gray-400 hover:text-white">
-                        <Plus size={24} />
-                      </button>
-                 </div>
-              )}
-            </div>
-          );
+                        ))}
+                    </div>
+                </div>
+            );
         };
 
-        const root = createRoot(document.getElementById('root'));
-        root.render(<BrowserApp />);
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
     </script>
 </body>
 </html>
